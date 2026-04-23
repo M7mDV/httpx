@@ -1,0 +1,118 @@
+name: httpx Live Hosts Discovery
+
+on:
+  # يشتغل يدوياً
+  workflow_dispatch:
+  
+  # يشتغل بعد ما Amass workflow يخلص (لو عايز chain)
+  workflow_run:
+    workflows: ["Amass Subdomain Enumeration"]
+    types:
+      - completed
+  
+  # يشتغل لما تدفع على الـ main branch
+  push:
+    branches: [main]
+    paths:
+      - 'subs.txt'
+
+jobs:
+  httpx-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install httpx
+        run: |
+          # تحميل httpx أحدث إصدار
+          wget -q https://github.com/projectdiscovery/httpx/releases/latest/download/httpx_$(uname -s)_$(uname -m).zip -O httpx.zip || \
+          wget -q https://github.com/projectdiscovery/httpx/releases/latest/download/httpx-linux-amd64.zip -O httpx.zip
+          
+          unzip -q httpx.zip
+          sudo mv httpx /usr/local/bin/ 2>/dev/null || sudo mv httpx-linux-amd64 /usr/local/bin/httpx 2>/dev/null || true
+          
+          # لو الـ unzip ماشتغلش، نستخدم go install
+          if ! command -v httpx &> /dev/null; then
+            go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+            echo "$HOME/go/bin" >> $GITHUB_PATH
+          fi
+          
+          httpx -version
+
+      - name: Run httpx Scan
+        run: |
+          # التأكد إن ملف subs.txt موجود
+          if [ ! -f subs.txt ]; then
+            echo "❌ subs.txt not found!"
+            exit 1
+          fi
+          
+          echo "=== Starting httpx scan ==="
+          echo "Total subdomains in subs.txt: $(wc -l < subs.txt)"
+          
+          # الأمر المطلوب
+          cat subs.txt | httpx \
+            -t 60 \
+            -nc \
+            -p top-ports \
+            -o live.txt
+          
+          echo "=== httpx scan completed ==="
+          echo "Total live hosts found: $(wc -l < live.txt)"
+          echo "=== Results ==="
+          cat live.txt
+
+      - name: Send Results to Discord (as File)
+        if: success()
+        run: |
+          SUBS_COUNT=$(wc -l < subs.txt)
+          LIVE_COUNT=$(wc -l < live.txt)
+          
+          # بيبعت live.txt كـ attachment
+          curl -X POST \
+            -H "Content-Type: multipart/form-data" \
+            -F "file=@live.txt" \
+            -F "payload_json={
+              \"username\": \"httpx Bot\",
+              \"avatar_url\": \"https://avatars.githubusercontent.com/u/50994705\",
+              \"embeds\": [{
+                \"title\": \"🌐 httpx Live Hosts Discovery\",
+                \"description\": \"Scan completed successfully!\",
+                \"color\": 3066993,
+                \"fields\": [
+                  {
+                    \"name\": \"📥 Input Subdomains\",
+                    \"value\": \"${SUBS_COUNT}\",
+                    \"inline\": true
+                  },
+                  {
+                    \"name\": \"✅ Live Hosts Found\",
+                    \"value\": \"${LIVE_COUNT}\",
+                    \"inline\": true
+                  },
+                  {
+                    \"name\": \"⚡ Threads\",
+                    \"value\": \"60\",
+                    \"inline\": true
+                  },
+                  {
+                    \"name\": \"📎 Attachment\",
+                    \"value\": \"live.txt\",
+                    \"inline\": true
+                  }
+                ],
+                \"footer\": {
+                  \"text\": \"httpx • $(date -u +\"%Y-%m-%d %H:%M UTC\")\"
+                }
+              }]
+            }" \
+            ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: Upload Results as Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: httpx-live-hosts
+          path: live.txt
