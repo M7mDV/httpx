@@ -1,16 +1,13 @@
 name: httpx Live Hosts Discovery
 
 on:
-  # يشتغل يدوياً
   workflow_dispatch:
   
-  # يشتغل بعد ما Amass workflow يخلص (لو عايز chain)
   workflow_run:
     workflows: ["Amass Subdomain Enumeration"]
     types:
       - completed
   
-  # يشتغل لما تدفع على الـ main branch
   push:
     branches: [main]
     paths:
@@ -24,26 +21,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
       - name: Install httpx
         run: |
-          # تحميل httpx أحدث إصدار
-          wget -q https://github.com/projectdiscovery/httpx/releases/latest/download/httpx_$(uname -s)_$(uname -m).zip -O httpx.zip || \
-          wget -q https://github.com/projectdiscovery/httpx/releases/latest/download/httpx-linux-amd64.zip -O httpx.zip
-          
-          unzip -q httpx.zip
-          sudo mv httpx /usr/local/bin/ 2>/dev/null || sudo mv httpx-linux-amd64 /usr/local/bin/httpx 2>/dev/null || true
-          
-          # لو الـ unzip ماشتغلش، نستخدم go install
-          if ! command -v httpx &> /dev/null; then
-            go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-            echo "$HOME/go/bin" >> $GITHUB_PATH
-          fi
-          
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
           httpx -version
 
       - name: Run httpx Scan
         run: |
-          # التأكد إن ملف subs.txt موجود
           if [ ! -f subs.txt ]; then
             echo "❌ subs.txt not found!"
             exit 1
@@ -52,7 +42,6 @@ jobs:
           echo "=== Starting httpx scan ==="
           echo "Total subdomains in subs.txt: $(wc -l < subs.txt)"
           
-          # الأمر المطلوب
           cat subs.txt | httpx \
             -t 60 \
             -nc \
@@ -70,7 +59,6 @@ jobs:
           SUBS_COUNT=$(wc -l < subs.txt)
           LIVE_COUNT=$(wc -l < live.txt)
           
-          # بيبعت live.txt كـ attachment
           curl -X POST \
             -H "Content-Type: multipart/form-data" \
             -F "file=@live.txt" \
@@ -104,7 +92,7 @@ jobs:
                   }
                 ],
                 \"footer\": {
-                  \"text\": \"httpx • $(date -u +\"%Y-%m-%d %H:%M UTC\")\"
+                  \"text\": \"httpx • $(date -u +\"%Y-%m-%d %H:%M UTC\")\" 
                 }
               }]
             }" \
