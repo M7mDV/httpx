@@ -45,6 +45,7 @@ jobs:
           cat subs.txt | httpx \
             -t 60 \
             -nc \
+            -mc 200,301,302 \
             -o live.txt
           
           echo "=== httpx scan completed ==="
